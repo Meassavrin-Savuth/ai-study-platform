@@ -18,6 +18,7 @@ func main() {
 
 	http.HandleFunc("/api/summarize", handlers.SummarizeHandler)
 	http.HandleFunc("/api/pdf", handlers.PDFHandler)
+	http.HandleFunc("/api/flashcards", handlers.FlashcardsHandler)
 
 	log.Println("Server running on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))

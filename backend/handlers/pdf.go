@@ -27,24 +27,22 @@ func PDFHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method != http.MethodPost {
-		json.NewEncoder(w).Encode(SummarizeResponse{Error: "Method not allowed"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
 		return
 	}
 
-	// Max 10MB file
 	r.ParseMultipartForm(10 << 20)
 
 	file, _, err := r.FormFile("pdf")
 	if err != nil {
-		json.NewEncoder(w).Encode(SummarizeResponse{Error: "No PDF file received"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "No PDF file received"})
 		return
 	}
 	defer file.Close()
 
-	// Save to temp file
 	tmp, err := os.CreateTemp("", "upload-*.pdf")
 	if err != nil {
-		json.NewEncoder(w).Encode(SummarizeResponse{Error: "Failed to save file"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save file"})
 		return
 	}
 	defer os.Remove(tmp.Name())
@@ -52,47 +50,51 @@ func PDFHandler(w http.ResponseWriter, r *http.Request) {
 	io.Copy(tmp, file)
 	tmp.Close()
 
-	// Extract text with Python
 	cmd := exec.Command("python3", "scripts/get_pdf_text.py", tmp.Name())
 	output, err := cmd.Output()
 	if err != nil {
-		json.NewEncoder(w).Encode(SummarizeResponse{Error: "Failed to extract PDF text"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to extract PDF text"})
 		return
 	}
 
 	var result pdfResult
 	if err := json.Unmarshal(output, &result); err != nil {
-		json.NewEncoder(w).Encode(SummarizeResponse{Error: "Failed to parse PDF text"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to parse PDF text"})
 		return
 	}
 
 	if result.Error != "" {
-		json.NewEncoder(w).Encode(SummarizeResponse{Error: result.Error})
+		json.NewEncoder(w).Encode(map[string]string{"error": result.Error})
 		return
 	}
 
-	// Limit text size to avoid token limits
 	text := result.Text
 	if len(text) > 8000 {
 		text = text[:8000]
 	}
 
-	// Send to Gemini
-	prompt := fmt.Sprintf(`You are a study assistant. Summarize this PDF document clearly for a student.
+	prompt := fmt.Sprintf(`You are a study assistant. Analyze this PDF and return ONLY a JSON object with no markdown, no backticks, no explanation.
 
-Include:
-- A 3-5 sentence summary
-- 3-5 key points as bullet points
-- 3 important terms with definitions
+Return exactly this structure:
+{
+  "summary": "3-5 sentence summary here",
+  "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"],
+  "important_terms": [
+    {"term": "Term 1", "definition": "Definition here"},
+    {"term": "Term 2", "definition": "Definition here"},
+    {"term": "Term 3", "definition": "Definition here"}
+  ],
+  "simple_explanation": "Explain this like I am 15 years old in 2-3 sentences"
+}
 
-Document:
+Content:
 %s`, text)
 
-	summary, err := services.SummarizeWithPrompt(prompt)
+	material, err := services.SummarizeWithPrompt(prompt)
 	if err != nil {
-		json.NewEncoder(w).Encode(SummarizeResponse{Error: "AI summarization failed"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "AI summarization failed"})
 		return
 	}
 
-	json.NewEncoder(w).Encode(SummarizeResponse{Summary: summary})
+	json.NewEncoder(w).Encode(material)
 }
